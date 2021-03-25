@@ -18,4 +18,6 @@ class AssetBundle(NamedObject):
         self.container = {}
         for i in range(container_size):
             key = reader.read_aligned_string()
-            self.container[key] = AssetInfo(reader)
+            asset_info = AssetInfo(reader)
+            new_key = f'{asset_info.asset.type}-{key}'
+            self.container[new_key] = asset_info
