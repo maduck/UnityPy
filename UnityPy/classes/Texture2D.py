@@ -3,6 +3,8 @@ from ..enums import TextureFormat
 from ..export import Texture2DConverter
 from ..helpers.ResourceReader import get_resource_data
 from ..streams import EndianBinaryWriter
+from PIL import Image
+from io import BufferedIOBase, RawIOBase, IOBase
 
 
 class Texture2D(Texture):
@@ -14,35 +16,105 @@ class Texture2D(Texture):
     def image(self, img):
         # img is PIL.Image / image path / opened file
         # overwrite original image data with the RGB(A) image data and sets the correct new format
-        img_data,tex_format = Texture2DConverter.image_to_texture(img)
         if img is None:
             raise Exception("No image provided")
 
+        if (
+            isinstance(img, str)
+            or isinstance(img, BufferedIOBase)
+            or isinstance(img, RawIOBase)
+            or isinstance(img, IOBase)
+        ):
+            img = Image.open(img)
+
+        img_data, tex_format = Texture2DConverter.image_to_texture2d(
+            img, self.m_TextureFormat
+        )
+
+        # disable mipmaps as we don't store them ourselves by default
+        if self.version[:2] < (5, 2):  # 5.2 down
+            self.m_MipMap = False
+        else:
+            self.m_MipCount = 1
+
         self.image_data = img_data
+        self.m_MipCount = 1
         # width * height * channel count
-        self.m_CompleteImageSize = img.width * img.height * len(img.getbands())
+        self.m_CompleteImageSize = len(
+            img_data
+        )  # img.width * img.height * len(img.getbands())
         self.m_TextureFormat = tex_format
-    
+
     @property
     def image_data(self):
         return self._image_data
-    
-    @image_data.setter
-    def image_data(self, data):
-        self._image_data = data
-        # prefer writing to cab if possible
-        if self.m_StreamData:
-            cab = self.assets_file.get_writeable_cab()
-            if cab:
-                self.m_StreamData.offset = cab.Position
-                cab.write(data)
-                self.m_StreamData.size = len(data)
-                self.m_StreamData.path = cab.path
-            else:
-                self.m_StreamData.offset = 0
-                self.m_StreamData.size = 0
-                self.m_StreamData.path = ''
 
+    def reset_streamdata(self):
+        if not self.m_StreamData:
+            return
+        self.m_StreamData.offset = 0
+        self.m_StreamData.size = 0
+        self.m_StreamData.path = ""
+
+    @image_data.setter
+    def image_data(self, data: bytes):
+        self._image_data = data
+        # ignore writing to cab for now until it's more stable
+        # if self.version >= (5, 3) and self.m_StreamData.path:
+        #     cab = self.assets_file.get_writeable_cab()
+        #     if cab:
+        #         self.m_StreamData.offset = cab.Position
+        #         cab.write(data)
+        #         self.m_StreamData.size = len(data)
+        #         self.m_StreamData.path = cab.path
+        #     else:
+        #         self.reset_streamdata()
+        self.reset_streamdata()
+
+    def set_image(
+        self,
+        img,
+        target_format: TextureFormat = None,
+        in_cab: bool = False,
+        mipmap_count: int = 1,
+    ):
+        if img is None:
+            raise Exception("No image provided")
+        if not target_format:
+            target_format = self.m_TextureFormat
+
+        img_data, tex_format = Texture2DConverter.image_to_texture2d(img, target_format)
+        if mipmap_count > 1:
+            width = self.m_Width
+            height = self.m_Height
+            re_img = img
+            for i in range(mipmap_count - 1):
+                width //= 2
+                height //= 2
+                if width < 4 or height < 4:
+                    mipmap_count = i + 1
+                    break
+                re_img = re_img.resize((width, height), Image.BICUBIC)
+                img_data += Texture2DConverter.image_to_texture2d(
+                    re_img, target_format
+                )[0]
+
+        if self.version[:2] < (5, 2):  # 5.2 down
+            self.m_MipMap = mipmap_count > 1
+        else:
+            self.m_MipCount = mipmap_count
+
+        if in_cab:
+            self.image_data = img_data
+        else:
+            self._image_data = img_data
+            self.reset_streamdata()
+
+        # width * height * channel count
+        self.m_CompleteImageSize = len(
+            img_data
+        )  # img.width * img.height * len(img.getbands())
+        self.m_TextureFormat = tex_format
 
     def __init__(self, reader):
         super().__init__(reader=reader)
@@ -80,7 +152,7 @@ class Texture2D(Texture):
             self.m_LightmapFormat = reader.read_int()
         if version >= (3, 5):  # 3.5 and up
             self.m_ColorSpace = reader.read_int()
-        if version >= (2020,2): # 2020.2 and up
+        if version >= (2020, 2):  # 2020.2 and up
             self.m_PlatformBlob = reader.read_byte_array()
             reader.align_stream()
 
@@ -89,7 +161,7 @@ class Texture2D(Texture):
 
         if image_data_size != 0:
             self._image_data = reader.read_bytes(image_data_size)
-        
+
         self.m_StreamData = None
         if version >= (5, 3):  # 5.3 and up
             # always read the StreamingInfo for resaving
@@ -118,7 +190,7 @@ class Texture2D(Texture):
             writer.write_boolean(self.m_MipMap)
         else:
             writer.write_int(self.m_MipCount)
-        
+
         if version >= (2, 6):  # 2.6 and up
             writer.write_boolean(self.m_IsReadable)  # 2.6 and up
         if version >= (2020,):  # 2020.1 and up
@@ -140,12 +212,11 @@ class Texture2D(Texture):
             writer.write_int(self.m_LightmapFormat)
         if version >= (3, 5):  # 3.5 and up
             writer.write_int(self.m_ColorSpace)
-        if version >= (2020,2): # 2020.2 and up
+        if version >= (2020, 2):  # 2020.2 and up
             writer.write_byte_array(self.m_PlatformBlob)
             writer.align_stream()
-        
 
-        if version[:2] < (5,3):
+        if version[:2] < (5, 3):
             # version without m_StreamData
             writer.write_int(len(self.image_data))
             writer.write_bytes(self.image_data)

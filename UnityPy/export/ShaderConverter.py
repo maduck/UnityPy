@@ -23,12 +23,12 @@ def export_shader(m_Shader):
         blobReader = EndianBinaryReader(decompressedBytes)
         program = ShaderProgram(blobReader, m_Shader.version)
 
-        return HEADER + program.Export(m_Shader.m_Script.decode("utf8"))
+        return HEADER + program.Export(bytes(m_Shader.m_Script).decode("utf8"))
 
     if hasattr(m_Shader, "compressedBlob"): # 5.5 and up
         return HEADER + ConvertSerializedShader(m_Shader)
 
-    return HEADER + m_Shader.m_Script.decode("utf8")
+    return HEADER + bytes(m_Shader.m_Script).decode("utf8")
 
 def ConvertSerializedShader(m_Shader):
     shaderPrograms = []
@@ -478,6 +478,7 @@ class ShaderSubProgram:
         #201708220 - Unity 2017.3, Unity 2017.4 & Unity 2018.1
         #201802150 - Unity 2018.2 & Unity 2018.3
         #201806140 - Unity 2019.1~2020.1
+        #202012090 - Unity 2021.2
 
         self.m_Version = reader.read_int()
         self.m_ProgramType = ShaderGpuProgramType(reader.read_int())
@@ -492,7 +493,7 @@ class ShaderSubProgram:
         for i in range(m_KeywordSize):
             self.m_Keywords.append(reader.read_aligned_string())
 
-        if self.m_Version >= 201806140:
+        if 201806140 <= self.m_Version < 202012090:
             m_LocalKeywordsSize = reader.read_int()
             self.m_LocalKeywords = []
 
@@ -532,7 +533,7 @@ class ShaderSubProgram:
                 ShaderGpuProgramType.kShaderGpuProgramGLCore41,
                 ShaderGpuProgramType.kShaderGpuProgramGLCore43
             ]:
-                sb.append(self.m_ProgramCode.tobytes().decode("utf8"))
+                sb.append(bytes(self.m_ProgramCode).decode("utf8"))
             elif self.m_ProgramType in [
                 ShaderGpuProgramType.kShaderGpuProgramDX9VertexSM20,
                 ShaderGpuProgramType.kShaderGpuProgramDX9VertexSM30,
@@ -557,7 +558,7 @@ class ShaderSubProgram:
                 ShaderGpuProgramType.kShaderGpuProgramMetalVS,
                 ShaderGpuProgramType.kShaderGpuProgramMetalFS
             ]:
-                reader = EndianBinaryReader(self.m_ProgramCode)
+                reader = EndianBinaryReader(self.m_ProgramCode, endian = "<")
                 fourCC = reader.read_u_int()
                 if fourCC == 0xf00dcafe:
                     offset = reader.read_int()
@@ -565,7 +566,7 @@ class ShaderSubProgram:
 
                 entryName = reader.read_string_to_null()
                 buff = reader.read_bytes(int(reader.Length - reader.Position))
-                sp.append(buff.decode("utf8"))
+                sb.append(bytes(buff).decode("utf8"))
             elif self.m_ProgramType == ShaderGpuProgramType.kShaderGpuProgramSPIRV:
                 # TODO SpirVShaderConverter
                 pass
@@ -576,7 +577,7 @@ class ShaderSubProgram:
                 ShaderGpuProgramType.kShaderGpuProgramConsoleDS,
                 ShaderGpuProgramType.kShaderGpuProgramConsoleGS
             ]:
-                sb.append(self.m_ProgramCode.decode("utf8"))
+                sb.append(bytes(self.m_ProgramCode).decode("utf8"))
             else:
                 sb.append("//shader disassembly not supported on {0}".format(self.m_ProgramType))
 

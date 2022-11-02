@@ -4,6 +4,7 @@ from ..helpers import TypeTreeHelper
 from ..streams import EndianBinaryWriter
 from ..files import ObjectReader
 import types
+from ..exceptions import TypeTreeError as TypeTreeError
 
 
 class Object(object):
@@ -35,8 +36,9 @@ class Object(object):
             self.read_typetree()
 
     def has_struct_member(self, name: str) -> bool:
-        return self.serialized_type.m_Nodes and any(
-            [x.name == name for x in self.serialized_type.m_Nodes]
+        nodes = self.reader.get_typetree_nodes()
+        return any(
+            node.m_Name == name for node in nodes
         )
 
     def dump_typetree(self, nodes: list = None) -> str:
@@ -46,29 +48,24 @@ class Object(object):
         return self.reader.dump_typetree_structure()
 
     def read_typetree(self, nodes: list = None) -> dict:
-        tree = self.reader.read_typetree()
+        tree = self.reader.read_typetree(nodes)
         self.type_tree = NodeHelper(tree, self.assets_file)
         return tree
 
     def save_typetree(self, nodes: list = None, writer: EndianBinaryWriter = None):
-        if not writer:
-            writer = EndianBinaryWriter(endian=self.reader.endian)
-
         def class_to_dict(value):
             if isinstance(value, list):
                 return [class_to_dict(val) for val in value]
             elif isinstance(value, dict):
-                return {
-                    key: class_to_dict(val)
-                    for key, val in value.items()
-                }
+                return {key: class_to_dict(val) for key, val in value.items()}
             elif hasattr(value, "__dict__"):
                 if isinstance(value, PPtr):
                     return {"m_PathID": value.path_id, "m_FileID": value.file_id}
                 return {
                     key: class_to_dict(val)
                     for key, val in value.__dict__.items()
-                    if not isinstance(value, (types.FunctionType, types.MethodType)) and not key in ["type_tree", "assets_file"]
+                    if not isinstance(value, (types.FunctionType, types.MethodType))
+                    and not key in ["type_tree", "assets_file"]
                 }
             else:
                 return value
@@ -88,13 +85,10 @@ class Object(object):
         if intern_call:
             if self.platform == BuildTarget.NoTarget:
                 writer.write_u_int(self._object_hide_flags)
-        elif self.serialized_type.nodes:
+        else:
             # save for objects WITHOUT specific save function
             # so we have to use the typetree if it exists
             self.save_typetree()
-        else:
-            raise NotImplementedError(
-                "There is no save function for this obj.type nor has it any typetree nodes that could be used.")
 
     def _save(self, writer):
         # the reader is actually an ObjectReader,
@@ -111,7 +105,8 @@ class Object(object):
             self.reader.Position = old_pos
             if name == "type_tree":
                 return self.type_tree
-
+        elif name == "read":
+            return lambda: self
         return getattr(self.type_tree, name)
 
     def get(self, key, default=None):
@@ -119,6 +114,16 @@ class Object(object):
 
     def __repr__(self):
         return "<%s %s>" % (self.__class__.__name__, self.name)
+
+    def __hash__(self):
+        return hash(self.path_id)
+
+    def __eq__(self, other):
+        if isinstance(other, Object):
+            return self.path_id == other.path_id
+        elif isinstance(other, int):
+            return self.path_id == other
+        return False
 
 
 class NodeHelper:
@@ -129,6 +134,7 @@ class NodeHelper:
             self.file_id = data["m_FileID"]
             self.index = data.get("m_Index", -2)
             self.assets_file = assets_file
+            self._obj = None
             self.__class__ = PPtr
         else:
             self.__dict__ = {

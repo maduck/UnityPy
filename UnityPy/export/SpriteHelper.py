@@ -1,27 +1,18 @@
-from enum import IntEnum
+from enum import IntEnum, IntFlag
 
 from PIL import Image, ImageDraw
 
 from .Texture2DConverter import get_image_from_texture2d
+from ..enums import ClassIDType, SpritePackingMode, SpritePackingRotation
 from ..streams import EndianBinaryReader
 
 
-# should be imported from Sprite, but too lazy to fix the import issues caused by that
-class SpritePackingRotation(IntEnum):
-    kSPRNone = (0,)
-    kSPRFlipHorizontal = (1,)
-    kSPRFlipVertical = (2,)
-    kSPRRotate180 = (3,)
-    kSPRRotate90 = 4
-
-
-class SpritePackingMode(IntEnum):
-    kSPMTight = (0,)
-    kSPMRectangle = 1
-
-
-def get_image(sprite, texture, alpha_texture) -> Image:
-    if alpha_texture and getattr(alpha_texture, "type", "") == "Texture2D":
+def get_image(sprite, texture, alpha_texture) -> Image.Image:
+    if (
+        alpha_texture
+        and getattr(alpha_texture, "type", ClassIDType.UnknownType)
+        == ClassIDType.Texture2D
+    ):
         cache_id = (texture.path_id, alpha_texture.path_id)
         if cache_id not in sprite.assets_file._cache:
             original_image = get_image_from_texture2d(texture.read(), False)
@@ -38,14 +29,14 @@ def get_image(sprite, texture, alpha_texture) -> Image:
     return sprite.assets_file._cache[cache_id]
 
 
-def get_image_from_sprite(m_Sprite) -> Image:
+def get_image_from_sprite(m_Sprite) -> Image.Image:
     atlas = None
-    if m_Sprite.m_SpriteAtlas:
+    if getattr(m_Sprite, "m_SpriteAtlas", None):
         atlas = m_Sprite.m_SpriteAtlas.read()
-    elif m_Sprite.m_AtlasTags:
+    elif getattr(m_Sprite, "m_AtlasTags", None):
         # looks like the direct pointer is empty, let's try to find the Atlas via its name
         for obj in m_Sprite.assets_file.objects.values():
-            if obj.type == "SpriteAtlas":
+            if obj.type == ClassIDType.SpriteAtlas:
                 atlas = obj.read()
                 if atlas.name == m_Sprite.m_AtlasTags[0]:
                     break
@@ -64,7 +55,12 @@ def get_image_from_sprite(m_Sprite) -> Image:
     original_image = get_image(m_Sprite, m_Texture2D, alpha_texture)
 
     sprite_image = original_image.crop(
-        (texture_rect.x, texture_rect.y, texture_rect.x + texture_rect.width, texture_rect.y + texture_rect.height)
+        (
+            texture_rect.x,
+            texture_rect.y,
+            texture_rect.x + texture_rect.width,
+            texture_rect.y + texture_rect.height,
+        )
     )
 
     if settings_raw.packed == 1:
@@ -114,7 +110,7 @@ def get_triangles(m_Sprite):
     points = []
     if hasattr(m_RD, "vertices"):  # 5.6 down
         vertices = [v.pos for v in m_RD.vertices]
-        points = [vertices[index] for index in range(m_RD.indices)]
+        points = [vertices[index] for index in m_RD.indices]
     else:  # 5.6 and up
         m_Channel = m_RD.m_VertexData.m_Channels[0]  # kShaderChannelVertex
         m_Stream = m_RD.m_VertexData.m_Streams[m_Channel.stream]

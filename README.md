@@ -7,33 +7,55 @@
 
 A Unity asset extractor for Python based on [AssetStudio](https://github.com/Perfare/AssetStudio).
 
-Next to extraction it also supports editing Unity assets.
+Next to extraction, it also supports editing Unity assets.
 So far following obj types can be edited:
   - Texture2D
   - Sprite(indirectly via linked Texture2D)
   - TextAsset
-  - MonoBehaviour
+  - MonoBehaviour (and all other types that you have the typetree of)
 
 If you need advice or if you want to talk about (game) data-mining,
 feel free to join the [UnityPy Discord](https://discord.gg/C6txv7M).
+
+
+If you're using UnityPy a commercial project,
+a donation to a charitable cause or a sponsorship of this project is expected.
+
+
+**As UnityPy is still in active development breaking changes can happen.**
+Those changes are usually limited to minor versions (x.y) and not to patch versions (x.y.z).
+So in case that you don't want to actively maintain your project,
+make sure to make a note of the used UnityPy version in your README or add a check in your code.
+e.g.
+```python
+if UnityPy.__version__ != '1.9.6':
+    raise ImportError("Invalid UnityPy version detected. Please use version 1.9.6")
+```
+
+
 
 1. [Installation](#installation)
 2. [Example](#example)
 3. [Important Classes](#important-classes)
 4. [Important Object Types](#important-object-types)
+5. [Credits](#credits)
 
 ## Installation
 
 **Python 3.6.0 or higher is required**
 
+via pypi
+
 ```cmd
 pip install UnityPy
 ```
 
-or download/clone the git and use
+from source
 
 ```cmd
-python setup.py install
+git clone https://github.com/K0lb3/UnityPy.git
+cd UnityPy
+python -m pip install .
 ```
 
 ### Notes
@@ -42,6 +64,15 @@ python setup.py install
 
 Visual C++ Redistributable is required for the brotli dependency.
 
+### Crash without warning/error
+
+The C-implementation of the typetree reader can directly crash python.
+In case this happens, the usage of the C-typetree reader can be disabled by adding these two lines to your main file.
+
+```python
+from UnityPy.helpers import TypeTreeHelper
+TypeTreeHelper.read_typetree_c = False
+```
 
 ## Example
 
@@ -64,7 +95,7 @@ def unpack_all_assets(source_folder : str, destination_folder : str):
             # iterate over internal objects
             for obj in env.objects:
                 # process specific object types
-                if obj.type in ["Texture2D", "Sprite"]:
+                if obj.type.name in ["Texture2D", "Sprite"]:
                     # parse the object data
                     data = obj.read()
 
@@ -81,7 +112,7 @@ def unpack_all_assets(source_folder : str, destination_folder : str):
 
             # alternative way which keeps the original path
             for path,obj in env.container.items():
-                if obj.type in ["Texture2D", "Sprite"]:
+                if obj.type.name in ["Texture2D", "Sprite"]:
                     data = obj.read()
                     # create dest based on original path
                     dest = os.path.join(destination_folder, *path.split("/"))
@@ -96,27 +127,27 @@ def unpack_all_assets(source_folder : str, destination_folder : str):
 You probably have to read [Important Classes](#important-classes)
 and [Important Object Types](#important-object-types) to understand how it works.
 
-People who have slightly advanced python skills should take a look at [examples/AssetBatchConverter.py](examples/AssetBatchConverter.py) for a more advanced example.
-It can also be used as general template.
+People with slightly advanced python skills should look at [UnityPy/tools/extractor.py](UnityPy/tools/extractor.py) for a more advanced example.
+It can also be used as a general template or as an importable tool.
 
 
 ## Important Classes
 
 ### [Environment](UnityPy/environment.py)
 
-Environment loads and parses the files that are given to it.
+Environment loads and parses the given files.
 It can be initialized via:
 
 * a file path - apk files can be loaded as well
 * a folder path - loads all files in that folder (bad idea for folders with a lot of files)
-* a stream - e.g. io.BytesIO, filestream,...
+* a stream - e.g., io.BytesIO, file stream,...
 * a bytes object - will be loaded into a stream
 
-UnityPy can detect itself if the file is a WebFile, BundleFile, Asset or APK itself.
+UnityPy can detect if the file is a WebFile, BundleFile, Asset, or APK.
 
-The unpacked assets will be loaded into ``.files``, which is a dict consisting of ``asset-name : asset``.
+The unpacked assets will be loaded into ``.files``, a dict consisting of ``asset-name : asset``.
 
-The all objects of the loaded assets can be easily accessed via ``.objects``,
+All objects of the loaded assets can be easily accessed via ``.objects``,
 which itself is a simple recursive iterator.
 
 ```python
@@ -148,13 +179,13 @@ One of these objects can be an AssetBundle, which contains a file path for some 
 
 All objects can be found in the ``.objects`` dict - ``{ID : object}``.
 
-The objects which have a file path can be found in the ``.container`` dict - ``{path : object}``.
+The objects with a file path can be found in the ``.container`` dict - ``{path : object}``.
 
-### [Object](UnityPy/ObjectReader.py)
+### [Object](UnityPy/files/ObjectReader.py)
 
-Objects contain the *actual* files which, e.g. textures, text files, meshes, settings, ...
+Objects contain the *actual* files, e.g., textures, text files, meshes, settings, ...
 
-To acquire the actual data of an object it has to be read first, this happens via the ``.read()`` function. This isn't done automatically to save time because only a small part of the objects are of interest. Serialized objects can be set with raw data using ``.set_raw_data(data)`` or modified with ``.save()`` function if supported.
+To acquire the actual data of an object it has to be read first. This happens via the ``.read()`` function. This isn't done automatically to save time because only a small part of the objects are of interest. Serialized objects can be set with raw data using ``.set_raw_data(data)`` or modified with ``.save()`` function, if supported.
 
 ## Important Object Types
 
@@ -171,7 +202,7 @@ __Export__
 ```python
 from PIL import Image
 for obj in env.objects:
-    if obj.type == "Texture2D":
+    if obj.type.name == "Texture2D":
         # export texture
         data = image.read()
         data.image.save(path)
@@ -185,7 +216,7 @@ for obj in env.objects:
 ### [Sprite](UnityPy/classes/Sprite.py)
 
 Sprites are part of a texture and can have a separate alpha-image as well.
-Unlike most other extractors (including AssetStudio) UnityPy merges those two images by itself.
+Unlike most other extractors (including AssetStudio), UnityPy merges those two images by itself.
 
 * ``.name``
 * ``.image`` - converts the merged texture part into a ``PIL.Image``
@@ -195,7 +226,7 @@ Unlike most other extractors (including AssetStudio) UnityPy merges those two im
 __Export__
 ```python
 for obj in env.objects:
-    if obj.type == "Sprite":
+    if obj.type.name == "Sprite":
         data = image.read()
         data.image.save(path)
 ```
@@ -213,7 +244,7 @@ Some games save binary data as TextFile, so it's usually better to use ``.script
 __Export__
 ```python
 for obj in env.objects:
-    if obj.type == "TextAsset":
+    if obj.type.name == "TextAsset":
         # export asset
         data = image.read()
         with open(path, "wb") as f:
@@ -228,8 +259,8 @@ for obj in env.objects:
 ### [MonoBehaviour](UnityPy/classes/MonoBehaviour.py)
 
 MonoBehaviour assets are usually used to save the class instances with their values.
-If a type tree exists it can be used to read the whole data,
-but if it doesn't, then it is usually necessary to investigate the class that loads the specific MonoBehaviour to extract the data.
+If a type tree exists, it can be used to read the whole data,
+but if it doesn't exist, then it is usually necessary to investigate the class that loads the specific MonoBehaviour to extract the data.
 ([example](examples/CustomMonoBehaviour/get_scriptable_texture.py))
 
 * ``.name``
@@ -241,18 +272,18 @@ __Export__
 import json
 
 for obj in env.objects:
-    if obj.type == "MonoBehaviour":
+    if obj.type.name == "MonoBehaviour":
         # export
         if obj.serialized_type.nodes:
             # save decoded data
             tree = obj.read_typetree()
-            fp = os.path.join(extract_dir, f"{data.name}.json"):
+            fp = os.path.join(extract_dir, f"{tree['m_Name']}.json")
             with open(fp, "wt", encoding = "utf8") as f:
                 json.dump(tree, f, ensure_ascii = False, indent = 4)
         else:
             # save raw relevant data (without Unity MonoBehaviour header)
             data = obj.read()
-            fp = os.path.join(extract_dir, f"{data.name}.bin"):
+            fp = os.path.join(extract_dir, f"{data.name}.bin")
             with open(fp, "wb") as f:
                 f.write(data.raw_data)
 
@@ -262,7 +293,8 @@ for obj in env.objects:
             # apply modifications to the data within the tree
             obj.save_typetree(tree)
         else:
-            with open(replace_dir, data.name) as f:
+            data = obj.read()
+            with open(os.path.join(replace_dir, data.name)) as f:
                 data.save(raw_data = f.read())
 ```
 
@@ -271,7 +303,7 @@ for obj in env.objects:
 * ``.samples`` - ``{sample-name : sample-data}``
 
 The samples are converted into the .wav format.
-The sample-data is a .wav file in bytes.
+The sample data is a .wav file in bytes.
 
 ```python
 clip : AudioClip
@@ -280,23 +312,10 @@ for name, data in clip.samples.items():
         f.write(data)
 ```
 
-### [Mesh](UnityPy/classes/Mesh.py)
-
-* ``.export()`` - mesh exported as .obj (str)
-
-The mesh is converted into an Wavefront .obj file.
-
-```python
-mesh : Mesh
-with open(f"{mesh.name}.obj", "wt", newline = "") as f:
-    # newline = "" is important
-    f.write(mesh.export())
-```
-
 ### [Font](UnityPy/classes/Font.py)
 
 ```python
-if obj.type == "Font":
+if obj.type.name == "Font":
     font : Font = obj.read()
     if font.m_FontData:
         extension = ".ttf"
@@ -306,3 +325,46 @@ if obj.type == "Font":
     with open(os.path.join(path, font.name+extension), "wb") as f:
         f.write(font.m_FontData)
 ```
+
+
+### [Mesh](UnityPy/classes/Mesh.py)
+
+* ``.export()`` - mesh exported as .obj (str)
+
+The mesh will be converted to the Wavefront .obj file format.
+
+```python
+mesh : Mesh
+with open(f"{mesh.name}.obj", "wt", newline = "") as f:
+    # newline = "" is important
+    f.write(mesh.export())
+```
+
+### Renderer, MeshRenderer, SkinnedMeshRenderer
+ALPHA-VERSION
+
+* ``.export(export_dir)`` - exports the associated mesh, materials, and textures into the given directory
+
+The mesh and materials will be in the Wavefront formats.
+
+```python
+mesh_renderer : Renderer
+export_dir: str
+
+if mesh_renderer.m_GameObject:
+    # get the name of the model
+    game_object = mesh_renderer.m_GameObject.read()
+    export_dir = os.path.join(export_dir, game_object.name)
+mesh_renderer.export(export_dir)
+```
+
+## Credits
+
+First of all,
+thanks a lot to all contributors of UnityPy and all of its users.
+
+Also,
+many thanks to:
+
+- [Perfare](https://github.com/Perfare) for creating and maintaining and every contributor of [AssetStudio](https://github.com/Perfare/AssetStudio)
+- [ds5678](https://github.com/ds5678) for the [TypeTreeDumps](https://github.com/AssetRipper/TypeTreeDumps) and the [custom minimal Tpk format](https://github.com/AssetRipper/Tpk)
